@@ -99,25 +99,44 @@ jobs:
             --name ${{ secrets.EKS_CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }}
 
+      - name: Patch aws-auth to grant IAM user access
+        run: |
+          # Get current AWS account ID and IAM user ARN
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IAM_USER_ARN="arn:aws:iam::${ACCOUNT_ID}:user/cloud_user"
+
+          # Patch aws-auth ConfigMap to add cloud_user as system:masters
+          kubectl patch configmap/aws-auth \
+            -n kube-system \
+            --type merge \
+            -p "{\"data\":{\"mapUsers\":\"- userarn: ${IAM_USER_ARN}\n  username: cloud_user\n  groups:\n    - system:masters\n\"}}" \
+            --kubeconfig ~/.kube/config \
+            --validate=false || \
+          echo "Patch failed, attempting eksctl method..."
+
+          # Fallback: use eksctl if available
+          if command -v eksctl &> /dev/null; then
+            eksctl create iamidentitymapping \
+              --cluster ${{ secrets.EKS_CLUSTER_NAME }} \
+              --region ${{ secrets.AWS_REGION }} \
+              --arn "${IAM_USER_ARN}" \
+              --group system:masters \
+              --username cloud_user
+          fi
+
       - name: Debug EKS Connection
         run: |
           aws sts get-caller-identity
-          aws eks list-clusters --region ${{ secrets.AWS_REGION }}
           kubectl config current-context
           kubectl get nodes
 
       - name: Deploy to Kubernetes
         run: |
-          # Replace image placeholder with actual image
           sed -i "s|YOUR_DOCKERHUB_USERNAME|${{ secrets.DOCKERHUB_USERNAME }}|g" k8s/deployment.yaml
-
-          # Apply with validation disabled to avoid openapi credential issue
           kubectl apply -f k8s/deployment.yaml --validate=false
-
           kubectl set image deployment/chatops-app \
             chatops-app=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             -n chatops
-
           kubectl rollout status deployment/chatops-app -n chatops --timeout=300s
 
       - name: Get service URL
