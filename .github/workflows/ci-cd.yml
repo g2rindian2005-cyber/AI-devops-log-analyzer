@@ -97,7 +97,12 @@ jobs:
           aws eks update-kubeconfig \
             --name ${{ secrets.EKS_CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }}
-
+      - name: Debug EKS Connection
+        run: |
+              aws sts get-caller-identity
+                  aws eks list-clusters --region ${{ secrets.AWS_REGION }}
+                   kubectl config current-context
+                     kubectl get nodes
       - name: Deploy to Kubernetes
         run: |
           # Replace image placeholder with actual image
