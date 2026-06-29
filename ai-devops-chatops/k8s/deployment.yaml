@@ -1,0 +1,107 @@
+# ── Namespace ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatops
+
+---
+# ── Secret (fill in real values or use kubectl create secret) ────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chatops-secrets
+  namespace: chatops
+type: Opaque
+stringData:
+  GEMINI_API_KEY: "YOUR_GEMINI_API_KEY"
+  SLACK_WEBHOOK_URL: "YOUR_SLACK_WEBHOOK_URL"
+  TELEGRAM_BOT_TOKEN: "YOUR_TELEGRAM_BOT_TOKEN"
+  TELEGRAM_CHAT_ID: "YOUR_TELEGRAM_CHAT_ID"
+
+---
+# ── Deployment ────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatops-app
+  namespace: chatops
+  labels:
+    app: chatops-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: chatops-app
+  template:
+    metadata:
+      labels:
+        app: chatops-app
+    spec:
+      containers:
+        - name: chatops-app
+          image: YOUR_DOCKERHUB_USERNAME/ai-devops-chatops:latest
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - secretRef:
+                name: chatops-secrets
+          env:
+            - name: PROMETHEUS_URL
+              value: "http://prometheus-service:9090"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+---
+# ── Service ───────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatops-service
+  namespace: chatops
+spec:
+  selector:
+    app: chatops-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: LoadBalancer
+
+---
+# ── HPA (auto-scaling) ────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chatops-hpa
+  namespace: chatops
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chatops-app
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
