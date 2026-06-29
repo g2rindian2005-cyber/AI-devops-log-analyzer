@@ -77,6 +77,7 @@ jobs:
             -d "{\"text\":\"🐳 Docker push *${STATUS}* for \`${{ env.IMAGE_NAME }}\` | SHA: \`${{ github.sha }}\`\"}"
 
   # ── Deploy to EKS ─────────────────────────────────────────────────────────────
+ # ── Deploy to EKS ─────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to EKS
     runs-on: ubuntu-latest
@@ -97,26 +98,33 @@ jobs:
           aws eks update-kubeconfig \
             --name ${{ secrets.EKS_CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }}
+
       - name: Debug EKS Connection
         run: |
-              aws sts get-caller-identity
-                  aws eks list-clusters --region ${{ secrets.AWS_REGION }}
-                   kubectl config current-context
-                     kubectl get nodes
+          aws sts get-caller-identity
+          aws eks list-clusters --region ${{ secrets.AWS_REGION }}
+          kubectl config current-context
+          kubectl get nodes
+
       - name: Deploy to Kubernetes
         run: |
           # Replace image placeholder with actual image
           sed -i "s|YOUR_DOCKERHUB_USERNAME|${{ secrets.DOCKERHUB_USERNAME }}|g" k8s/deployment.yaml
-          kubectl apply -f k8s/deployment.yaml
+
+          # Apply with validation disabled to avoid openapi credential issue
+          kubectl apply -f k8s/deployment.yaml --validate=false
+
           kubectl set image deployment/chatops-app \
             chatops-app=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
             -n chatops
+
           kubectl rollout status deployment/chatops-app -n chatops --timeout=300s
 
       - name: Get service URL
         run: |
           echo "Service URL:"
-          kubectl get svc chatops-service -n chatops -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+          kubectl get svc chatops-service -n chatops \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
       - name: Notify Slack — deployment
         if: always()
